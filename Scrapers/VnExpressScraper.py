@@ -285,9 +285,9 @@ class VnExpressScraper:
         
         return list(article_urls)
     
-    def scrape_urls_from_file(self, links_file: str, output_file: str, max_categories: Optional[int] = None):
+    def scrape_urls_from_file(self, input_file: str, output_file: str, max_categories: Optional[int] = None):
         # Read category URLs
-        with open(links_file, 'r', encoding='utf-8') as f:
+        with open(input_file, 'r', encoding='utf-8') as f:
             category_urls = [line.strip() for line in f if line.strip()]
         
         if max_categories:
