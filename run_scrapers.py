@@ -40,7 +40,7 @@ def run_full_scraping(input_file,output_file):
     
     try:
         scraper.scrape_urls_from_file(
-            links_file=input_file,
+            input_file=input_file,
             output_file=output_file,
             max_categories=None, 
         )
@@ -63,5 +63,5 @@ def run_full_scraping(input_file,output_file):
 
 
 input_file = 'data/input.txt'
-output_file = 'data/vietnamese_dataset_full.jsonl2'
+output_file = 'data/vietnamese_dataset_full2.jsonl'
 run_full_scraping(input_file, output_file)

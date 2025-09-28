@@ -1,15 +1,13 @@
-import requests
-import json
-import uuid
-import re
-import time
-from urllib.parse import urljoin, urlparse
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+import requests, json, uuid, re, time
+from urllib.parse import urljoin
+from typing import Dict, List, Optional
 from bs4 import BeautifulSoup
-from langdetect import detect, DetectorFactory
-from unidecode import unidecode
+from langdetect import DetectorFactory
 from tqdm import tqdm
+from utils.headers import headers
+from utils.clean_text import clean_text
+from utils.Vietnames import is_vietnamese_text
+from utils.helpers import count_words
 
 DetectorFactory.seed = 0
 
@@ -18,19 +16,7 @@ class VnExpressScraper:
     def __init__(self, delay: float = 0.1):
         self.delay = delay
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'vi-VN,vi;q=0.8,en-US;q=0.5,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
-        
-        self.vietnamese_patterns = [
-            r'[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđĐ]',
-            r'\b(và|hoặc|với|của|trong|ngoài|trên|dưới|sau|trước|bằng|theo|về|để|cho|từ|tại|này|đó|những|các|một|hai|ba|tôi|bạn|anh|chị|em)\b'
-        ]
+        self.session.headers.update(headers)
         
     def fetch_url(self, url: str) -> Optional[BeautifulSoup]:
 
@@ -39,8 +25,7 @@ class VnExpressScraper:
             response.raise_for_status()
             
             content_type = response.headers.get('content-type', '').lower()
-            if 'text/html' not in content_type:
-                print(f"Skipping non-HTML content: {url}")
+            if not any(ct in content_type for ct in ('text/html', 'application/xhtml+xml')):
                 return None
                 
             soup = BeautifulSoup(response.content, 'lxml')
@@ -71,13 +56,12 @@ class VnExpressScraper:
                 title_elem = soup.select_one(selector)
                 if title_elem:
                     title = title_elem.get_text().strip()
-                    if title and len(title) > 10 and '406' not in title:  # Valid title
+                    if title and len(title) > 10 : 
                         break
             
             if not title or '406' in title:
                 return None
             
-            # Extract main content - updated selectors for current vnexpress structure
             content = ""
             content_selectors = [
                 'article.fck_detail',
@@ -109,7 +93,7 @@ class VnExpressScraper:
                             elem.decompose()
                     
                     content = content_elem.get_text()
-                    if content and len(content) > 100:  # Valid content
+                    if content and len(content) > 100:
                         break
             
             # If no content found with specific selectors, try to find largest text block
@@ -135,93 +119,7 @@ class VnExpressScraper:
         except Exception as e:
             print(f"Error extracting content from {url}: {e}")
             return None
-    
-    def clean_text(self, text: str) -> str:
-
-        if not text:
-            return ""
-        
-        # Remove HTML entities
-        text = re.sub(r'&[a-zA-Z0-9#]+;', ' ', text)
-        
-        # Remove URLs
-        text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', ' ', text)
-        
-        # Remove email addresses
-        text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', ' ', text)
-        
-        # Remove phone numbers
-        text = re.sub(r'(\+84|0)[0-9]{8,10}', ' ', text)
-        
-        # Remove excessive whitespace and normalize
-        text = re.sub(r'\s+', ' ', text)
-        text = text.strip()
-        
-        # Remove lines that are too short (likely navigation/ads)
-        lines = text.split('\n')
-        cleaned_lines = []
-        for line in lines:
-            line = line.strip()
-            if len(line) > 20 and not re.match(r'^[0-9\s\-\.,:;]+$', line):
-                cleaned_lines.append(line)
-        
-        text = '\n'.join(cleaned_lines)
-        
-        # Final cleanup
-        text = re.sub(r'\n\s*\n', '\n', text)  # Remove empty lines
-        text = re.sub(r'[^\w\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđĐ\.,!?;:()"\'-]', ' ', text)
-        text = re.sub(r'\s+', ' ', text)
-        
-        return text.strip()
-    
-    def is_vietnamese_text(self, text: str) -> Tuple[bool, float]:
-        if not text or len(text) < 50:
-            return False, 0.0
-        
-        # Count Vietnamese characters
-        vietnamese_chars = len(re.findall(self.vietnamese_patterns[0], text))
-        total_alpha_chars = len(re.findall(r'[a-zA-ZàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđĐ]', text))
-        
-        if total_alpha_chars == 0:
-            return False, 0.0
-        
-        vietnamese_char_ratio = vietnamese_chars / total_alpha_chars
-        
-        # Count Vietnamese words
-        vietnamese_words = len(re.findall(self.vietnamese_patterns[1], text, re.IGNORECASE))
-        total_words = len(text.split())
-        
-        vietnamese_word_ratio = vietnamese_words / max(total_words, 1)
-        
-        # Check for common Vietnamese phrases
-        vietnamese_phrases = [
-            r'\bviệt nam\b', r'\btheo báo\b', r'\btrong khi\b', r'\bngười dân\b',
-            r'\bchính phủ\b', r'\bthành phố\b', r'\bhà nội\b', r'\btphcm\b',
-            r'\bngười\b', r'\bviệc\b', r'\bthời gian\b', r'\bkhu vực\b'
-        ]
-        
-        phrase_count = 0
-        for phrase in vietnamese_phrases:
-            if re.search(phrase, text, re.IGNORECASE):
-                phrase_count += 1
-        
-        phrase_score = min(phrase_count / 4, 1.0)
-        
-        # Combined score - more lenient
-        confidence = (vietnamese_char_ratio * 0.4 + vietnamese_word_ratio * 0.4 + phrase_score * 0.2)
-        
-        # Lower threshold for acceptance
-        return confidence > 0.15, confidence
-    
-    def count_words(self, text: str) -> int:
-
-        if not text:
-            return 0
-        
-        # Split by whitespace and count non-empty elements
-        words = [word for word in text.split() if word.strip()]
-        return len(words)
-    
+       
     def scrape_url(self, url: str) -> Optional[Dict]:
 
         soup = self.fetch_url(url)
@@ -234,20 +132,20 @@ class VnExpressScraper:
             return None
         
         # Clean title and content
-        title = self.clean_text(article_data['title'])
-        content = self.clean_text(article_data['content'])
+        title = clean_text(article_data['title'])
+        content = clean_text(article_data['content'])
         
         # Combine title and content
         full_text = f"{title}. {content}".strip()
         
         # Validate Vietnamese content
-        is_vietnamese, confidence = self.is_vietnamese_text(full_text)
+        is_vietnamese, confidence = is_vietnamese_text(full_text)
         if not is_vietnamese:
             print(f"Skipping non-Vietnamese content: {url} (confidence: {confidence:.2f})")
             return None
         
         # Check word count
-        word_count = self.count_words(full_text)
+        word_count = count_words(full_text)
         if word_count < 200:
             print(f"Skipping short article: {url} ({word_count} words)")
             return None
@@ -265,13 +163,21 @@ class VnExpressScraper:
         
         return entry
     
-    def find_article_urls(self, category_url: str) -> List[str]:
+    def find_article_urls(self, category_url: str, max_depth: int , visited_urls: Optional[set] = None) -> List[str]:
 
+        if visited_urls is None:
+            visited_urls = set()
+        
+        if category_url in visited_urls or max_depth < 0:
+            return []
+        
+        visited_urls.add(category_url)
         soup = self.fetch_url(category_url)
         if not soup:
             return []
         
         article_urls = set()
+        navigation_urls = set()
         
         for link in soup.find_all('a', href=True):
             href = link['href']
@@ -279,13 +185,66 @@ class VnExpressScraper:
             if href.startswith('/'):
                 href = urljoin(category_url, href)
             
-            if ('vnexpress.net' in href and href.endswith('.html')):
+            if 'vnexpress.net' not in href:
+                continue
+                
+            if href.endswith('.html'):
                 article_urls.add(href)
-
+            elif (max_depth > 0 and href not in visited_urls and 
+                  any(section in href.lower() for section in [
+                      '/the-thao', '/kinh-doanh', '/giai-tri', '/phap-luat',
+                      '/giao-duc', '/suc-khoe', '/gia-dinh', '/du-lich',
+                      '/so-hoa', '/xe', '/y-kien', '/tam-su', '/cuoi'
+                  ])):
+                navigation_urls.add(href)
+        
+        # Recursively explore navigation URLs with depth limit
+        for nav_url in list(navigation_urls)[:3]:  # Limit to prevent excessive requests
+            try:
+                recursive_articles = self.find_article_urls(nav_url, max_depth - 1, visited_urls)
+                article_urls.update(recursive_articles)
+                time.sleep(self.delay)
+            except Exception as e:
+                print(f"Error exploring {nav_url}: {e}")
+                continue
         
         return list(article_urls)
     
-    def scrape_urls_from_file(self, input_file: str, output_file: str, max_categories: Optional[int] = None):
+    def find_internal_article_links(self, article_urls: List[str]) -> List[str]:
+        all_articles = set(article_urls)
+        articles_to_check = article_urls
+        
+        for article_url in tqdm(articles_to_check, desc="Finding internal links"):
+            try:
+                soup = self.fetch_url(article_url)
+                if not soup:
+                    continue
+                
+                # Check content areas for internal links
+                content_selectors = ['.fck_detail', '.article-content', '.content-detail', 'article']
+                for selector in content_selectors:
+                    content_area = soup.select_one(selector)
+                    if content_area:
+                        for link in content_area.find_all('a', href=True):
+                            href = link['href']
+                            
+                            if href.startswith('/'):
+                                href = urljoin(article_url, href)
+                            
+                            if 'vnexpress.net' in href and href.endswith('.html'):
+                                all_articles.add(href)
+                        break
+                
+                time.sleep(self.delay)
+                
+            except Exception as e:
+                print(f"Error checking internal links in {article_url}: {e}")
+                continue
+        
+        return list(all_articles)
+    
+    def scrape_urls_from_file(self, input_file: str, output_file: str, max_categories: Optional[int] = None, use_recursive: bool = True, use_internal_links: bool = True):
+
         # Read category URLs
         with open(input_file, 'r', encoding='utf-8') as f:
             category_urls = [line.strip() for line in f if line.strip()]
@@ -293,12 +252,18 @@ class VnExpressScraper:
         if max_categories:
             category_urls = category_urls[:max_categories]
         
-        
         # Collect all article URLs
         all_article_urls = []
         for category_url in tqdm(category_urls, desc="Finding articles"):
             try:
-                article_urls = self.find_article_urls(category_url)
+                # Use recursive discovery if enabled
+                max_depth = 4 if use_recursive else 0
+                article_urls = self.find_article_urls(category_url, max_depth=max_depth)
+                
+                # Find internal links if enabled
+                if use_internal_links and article_urls:
+                    article_urls = self.find_internal_article_links(article_urls)
+                
                 all_article_urls.extend(article_urls)
                 print(f"Found {len(article_urls)} articles in {category_url}")
                 time.sleep(self.delay)
@@ -323,7 +288,7 @@ class VnExpressScraper:
                         f.write(json.dumps(entry, ensure_ascii=False) + '\n')
                         f.flush()  # Ensure data is written immediately
                         successful_count += 1
-                        print(f"✓ Scraped: {entry['title'][:50]}... ({self.count_words(entry['text'])} words)")
+                        print(f"✓ Scraped: {entry['title'][:50]}... ({count_words(entry['text'])} words)")
                     
                     # Be respectful to the server
                     time.sleep(self.delay)
