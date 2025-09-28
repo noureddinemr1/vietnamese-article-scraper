@@ -8,6 +8,7 @@ from utils.headers import headers
 from utils.clean_text import clean_text
 from utils.Vietnames import is_vietnamese_text
 from utils.helpers import count_words
+from utils.selectors import title_selectors, content_selectors
 
 DetectorFactory.seed = 0
 
@@ -41,17 +42,6 @@ class VnExpressScraper:
     def extract_article_content(self, soup: BeautifulSoup, url: str) -> Optional[Dict[str, str]]:
         try:
             title = None
-            title_selectors = [
-                'h1.title-detail',
-                'h1.title_news_detail', 
-                'h1.title_detail',
-                '.title-news h1',
-                'h1[class*="title"]',
-                'h1',
-                '.article-title',
-                '[class*="title"] h1'
-            ]
-            
             for selector in title_selectors:
                 title_elem = soup.select_one(selector)
                 if title_elem:
@@ -63,22 +53,6 @@ class VnExpressScraper:
                 return None
             
             content = ""
-            content_selectors = [
-                'article.fck_detail',
-                '.fck_detail',
-                'div.fck_detail',
-                'article[class*="detail"]',
-                '.article-content',
-                '.Normal',
-                'div.content_detail',
-                '.content-detail',
-                '[class*="article-body"]',
-                '.article-body',
-                'div[class*="content"]',
-                'div[class*="detail"]',
-                'article',
-                '.content'
-            ]
             
             for selector in content_selectors:
                 content_elem = soup.select_one(selector)
@@ -190,16 +164,10 @@ class VnExpressScraper:
                 
             if href.endswith('.html'):
                 article_urls.add(href)
-            elif (max_depth > 0 and href not in visited_urls and 
-                  any(section in href.lower() for section in [
-                      '/the-thao', '/kinh-doanh', '/giai-tri', '/phap-luat',
-                      '/giao-duc', '/suc-khoe', '/gia-dinh', '/du-lich',
-                      '/so-hoa', '/xe', '/y-kien', '/tam-su', '/cuoi'
-                  ])):
+            elif (max_depth > 0 and href not in visited_urls): 
                 navigation_urls.add(href)
         
-        # Recursively explore navigation URLs with depth limit
-        for nav_url in list(navigation_urls)[:3]:  # Limit to prevent excessive requests
+        for nav_url in list(navigation_urls): 
             try:
                 recursive_articles = self.find_article_urls(nav_url, max_depth - 1, visited_urls)
                 article_urls.update(recursive_articles)
@@ -219,9 +187,7 @@ class VnExpressScraper:
                 soup = self.fetch_url(article_url)
                 if not soup:
                     continue
-                
-                # Check content areas for internal links
-                content_selectors = ['.fck_detail', '.article-content', '.content-detail', 'article']
+
                 for selector in content_selectors:
                     content_area = soup.select_one(selector)
                     if content_area:
