@@ -1,5 +1,5 @@
 import re
-def is_vietnamese_text(text,vietnames_patterns):
+def is_vietnamese_text(text):
         if not text or len(text) < 50:
             return False, 0.0
         
